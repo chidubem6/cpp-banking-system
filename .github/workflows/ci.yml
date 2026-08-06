@@ -5,6 +5,15 @@ on:
     branches: [main]
   pull_request:
 
+# The workflow only reads the repository; nothing needs write access.
+permissions:
+  contents: read
+
+# A push to main while its PR is still open would otherwise run twice.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build-and-test:
     name: ${{ matrix.os }}
