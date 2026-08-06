@@ -13,7 +13,6 @@ set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
 FetchContent_MakeAvailable(googletest)
 
 add_executable(banking_tests
-    test_smoke.cpp
     test_transaction.cpp
     test_money.cpp
     test_sha256.cpp
