@@ -1,25 +1,48 @@
 #ifndef BANK_H
 #define BANK_H
 
+#include <string>
+#include <utility>
 #include <vector>
+
 #include "Account.h"
+#include "Money.h"
 
+// Owns every account and enforces the rules that span more than one of them.
+// Returns results; never writes to the console and never touches the disk.
 class Bank {
-    private:
-        std::vector<Account> accounts;
+public:
+    enum class CreateResult { Ok, DuplicateAccountNumber, InvalidName, InvalidPin, InvalidAmount };
+    enum class LoginResult { Ok, NotFound, WrongPin, Locked };
+    enum class TransferResult {
+        Ok,
+        SenderNotFound,
+        ReceiverNotFound,
+        SameAccount,
+        InvalidAmount,
+        InsufficientFunds,
+        Overflow
+    };
 
-    public:
-        void createAccount(int accNum, const std::string& accName, const std::string& accPin, double accBalance);
-        
-        Account* findAccount(int accNum);
+    CreateResult createAccount(int accountNumber, const std::string& name, const std::string& pin,
+                               Money openingBalance);
 
-        Account* logIn(int accNum, const std::string& inputPin);
+    // Returns a result only, never a pointer. Callers hold the account number
+    // for the session and re-resolve it per operation, because addAccount can
+    // reallocate the underlying vector and invalidate any pointer handed out
+    // earlier.
+    LoginResult logIn(int accountNumber, const std::string& pin);
 
-        void transfer(int senderAccNum, int receiverAccNum, double amount);
+    TransferResult transfer(int fromAccount, int toAccount, Money amount);
 
-        void saveToFile(const std::string& filename);
+    Account* findAccount(int accountNumber);
+    const Account* findAccount(int accountNumber) const;
 
-        void loadFromFile(const std::string& filename);
+    const std::vector<Account>& accounts() const { return accounts_; }
+    void addAccount(Account account) { accounts_.push_back(std::move(account)); }
+
+private:
+    std::vector<Account> accounts_;
 };
 
 #endif

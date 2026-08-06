@@ -1,35 +1,52 @@
 #include "Account.h"
-#include <iostream>
 
-bool Account::deposit(double amount, const std::string& details) {
-    if (amount > 0) {
-        balance += amount;
-        transactionHistory.push_back(Transaction("Deposit", amount, details, balance));
-        return true;
+#include <utility>
+
+Account::Account(int accountNumber, std::string name, const std::string& pin, Money openingBalance)
+    : accountNumber_{accountNumber},
+      name_{std::move(name)},
+      credential_{makePinCredential(pin)},
+      balance_{openingBalance} {}
+
+Account::Account(int accountNumber, std::string name, PinCredential credential, Money balance,
+                 int failedAttempts, std::vector<Transaction> history)
+    : accountNumber_{accountNumber},
+      name_{std::move(name)},
+      credential_{std::move(credential)},
+      balance_{balance},
+      failedAttempts_{failedAttempts},
+      history_{std::move(history)} {}
+
+Account::AuthResult Account::authenticate(const std::string& pin) {
+    if (isLocked()) return AuthResult::Locked;
+
+    if (!verifyPin(credential_, pin)) {
+        ++failedAttempts_;
+        return AuthResult::WrongPin;
     }
-    return false;
+    failedAttempts_ = 0;
+    return AuthResult::Ok;
 }
 
-bool Account::withdraw(double amount, const std::string& details) {
-    if (amount > 0 && amount <= balance) {
-        balance -= amount;
-        transactionHistory.push_back(Transaction("Withdrawal", amount, details, balance));
-        return true;
-    }
-    return false;
+Account::DepositResult Account::deposit(Money amount, TransactionType type, std::string details) {
+    if (!amount.isPositive()) return DepositResult::InvalidAmount;
+
+    const auto updated = balance_.tryAdd(amount);
+    if (!updated) return DepositResult::Overflow;
+
+    balance_ = *updated;
+    history_.emplace_back(type, amount, std::move(details), balance_);
+    return DepositResult::Ok;
 }
 
-void Account::addTransaction(const Transaction& transaction) {
-    transactionHistory.push_back(transaction);
-}
+Account::WithdrawResult Account::withdraw(Money amount, TransactionType type, std::string details) {
+    if (!amount.isPositive()) return WithdrawResult::InvalidAmount;
+    if (amount > balance_) return WithdrawResult::InsufficientFunds;
 
-void Account::showTransactionHistory() const {
-    if (transactionHistory.empty()) {
-        std::cout << "No transactions have been made \n";
-        return;
-    }
+    const auto updated = balance_.trySubtract(amount);
+    if (!updated) return WithdrawResult::InsufficientFunds;
 
-    for (const auto& transaction : transactionHistory) {
-        std::cout << transaction.toString() << std::endl;
-    }
+    balance_ = *updated;
+    history_.emplace_back(type, amount, std::move(details), balance_);
+    return WithdrawResult::Ok;
 }
