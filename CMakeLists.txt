@@ -33,11 +33,18 @@ target_include_directories(banking_core
 )
 target_link_libraries(banking_core PUBLIC banking_warnings)
 
-add_executable(bank
-    src/cli/main.cpp
-    src/cli/Cli.cpp
+# The CLI is its own library rather than living inside the executable, so the
+# tests can link it. Previously only `bank` compiled Cli.cpp, which meant
+# nothing else could reach it - and the input-handling defects found in review
+# were all in that file.
+add_library(banking_cli src/cli/Cli.cpp)
+target_include_directories(banking_cli
+    PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src/cli>
 )
-target_link_libraries(bank PRIVATE banking_core)
+target_link_libraries(banking_cli PUBLIC banking_core)
+
+add_executable(bank src/cli/main.cpp)
+target_link_libraries(bank PRIVATE banking_cli)
 
 include(CTest)
 if(BUILD_TESTING)

@@ -170,10 +170,12 @@ every push to `main`.
 | `Bank` | Every result branch, including that a failed transfer moves no money |
 | `Storage` | Round-trips, names containing commas, truncated and malformed files |
 
-The interactive menu loop is deliberately untested: exercising `std::cin` prompts
-needs I/O plumbing worth more than it returns here. The CLI is kept as a thin
-shell over tested logic, and `Cli` takes its streams by reference so it can be
-driven by a test later without redesign.
+`Cli` takes its input and output streams by reference rather than reaching for
+`std::cin` and `std::cout` directly, so a test drives an entire session with two
+`std::stringstream`s and asserts on what the user would have seen. That covers
+the input handling, which is where the more embarrassing bugs live: a name
+truncating at a space, a non-numeric entry spinning forever, a login prompt that
+quietly reveals which account numbers exist.
 
 Warnings are enabled on both toolchains (`/W4`, `-Wall -Wextra -Wpedantic`). That
 is not decoration: `/W4` is what surfaced the uninitialised-read defect described
