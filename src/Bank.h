@@ -1,6 +1,7 @@
 #ifndef BANK_H
 #define BANK_H
 
+#include <ctime>
 #include <string>
 #include <utility>
 #include <vector>
@@ -31,7 +32,9 @@ public:
     // for the session and re-resolve it per operation, because addAccount can
     // reallocate the underlying vector and invalidate any pointer handed out
     // earlier.
-    LoginResult logIn(int accountNumber, const std::string& pin);
+    // `now` is threaded through rather than read from the clock here, so
+    // lockout expiry stays testable. See Account::isLocked.
+    LoginResult logIn(int accountNumber, const std::string& pin, std::time_t now);
 
     TransferResult transfer(int fromAccount, int toAccount, Money amount);
 

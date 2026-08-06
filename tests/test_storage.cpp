@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 
 #include <cstdio>
+#include <ctime>
 #include <fstream>
 #include <string>
 #include <utility>
@@ -123,22 +124,22 @@ TEST(Storage, PreservesPinsAcrossSaveAndLoad) {
 
     Bank loaded;
     ASSERT_TRUE(storage::load(loaded, file.path()).ok);
-    EXPECT_EQ(Bank::LoginResult::Ok, loaded.logIn(1001, "1111"));
-    EXPECT_EQ(Bank::LoginResult::WrongPin, loaded.logIn(1002, "9999"));
+    EXPECT_EQ(Bank::LoginResult::Ok, loaded.logIn(1001, "1111", std::time(nullptr)));
+    EXPECT_EQ(Bank::LoginResult::WrongPin, loaded.logIn(1002, "9999", std::time(nullptr)));
 }
 
 TEST(Storage, PreservesTheFailedAttemptCounter) {
     TempFile file("test_attempts.txt");
     auto original = makeBank();
-    original.logIn(1001, "0000");
-    original.logIn(1001, "0000");
+    original.logIn(1001, "0000", std::time(nullptr));
+    original.logIn(1001, "0000", std::time(nullptr));
     ASSERT_TRUE(storage::save(original, file.path()).ok);
 
     Bank loaded;
     ASSERT_TRUE(storage::load(loaded, file.path()).ok);
     EXPECT_EQ(2, loaded.findAccount(1001)->failedAttempts());
     // One more failure locks it, proving the counter carried across.
-    EXPECT_EQ(Bank::LoginResult::Locked, loaded.logIn(1001, "0000"));
+    EXPECT_EQ(Bank::LoginResult::Locked, loaded.logIn(1001, "0000", std::time(nullptr)));
 }
 
 TEST(Storage, TreatsAMissingFileAsAnEmptyBank) {
@@ -150,7 +151,7 @@ TEST(Storage, TreatsAMissingFileAsAnEmptyBank) {
 
 TEST(Storage, IgnoresBlankLines) {
     TempFile file("test_blank_lines.txt");
-    file.write("\nACC,1001,Alice,abc,def,10000,0\n\n\n");
+    file.write("\nACC,1001,Alice,abc,def,10000,0,0\n\n\n");
     Bank bank;
     EXPECT_TRUE(storage::load(bank, file.path()).ok);
     EXPECT_EQ(1u, bank.accounts().size());
@@ -176,7 +177,7 @@ TEST(Storage, RejectsAnAccountLineWithTooFewFields) {
 
 TEST(Storage, RejectsNonNumericFields) {
     TempFile file("test_non_numeric.txt");
-    file.write("ACC,notanumber,Alice,abc,def,10000,0\n");
+    file.write("ACC,notanumber,Alice,abc,def,10000,0,0\n");
     Bank bank;
     EXPECT_FALSE(storage::load(bank, file.path()).ok);
 }
@@ -192,7 +193,7 @@ TEST(Storage, RejectsATransactionBeforeAnyAccount) {
 
 TEST(Storage, RejectsAnUnknownTransactionType) {
     TempFile file("test_bad_txn_type.txt");
-    file.write("ACC,1001,Alice,abc,def,10000,0\nTXN,Nonsense,5000,Pay,15000\n");
+    file.write("ACC,1001,Alice,abc,def,10000,0,0\nTXN,Nonsense,5000,Pay,15000\n");
     Bank bank;
     const auto outcome = storage::load(bank, file.path());
     EXPECT_FALSE(outcome.ok);
@@ -201,7 +202,7 @@ TEST(Storage, RejectsAnUnknownTransactionType) {
 
 TEST(Storage, RejectsATruncatedFinalLine) {
     TempFile file("test_truncated.txt");
-    file.write("ACC,1001,Alice,abc,def,10000,0\nTXN,Deposit,5000\n");
+    file.write("ACC,1001,Alice,abc,def,10000,0,0\nTXN,Deposit,5000\n");
     Bank bank;
     EXPECT_FALSE(storage::load(bank, file.path()).ok);
 }
@@ -212,7 +213,7 @@ TEST(Storage, RejectsATruncatedFinalLine) {
 // second line aborted it.
 TEST(Storage, LeavesTheBankUntouchedWhenLoadingFails) {
     TempFile file("test_atomic_load.txt");
-    file.write("ACC,1001,Alice,abc,def,10000,0\nGARBAGE\n");
+    file.write("ACC,1001,Alice,abc,def,10000,0,0\nGARBAGE\n");
 
     Bank bank;
     bank.createAccount(7777, "Pre-existing", "9999", Money::fromPence(300));
@@ -263,7 +264,7 @@ TEST(Storage, SurvivesANameContainingANewline) {
 // save() faithfully rewrote it.
 TEST(Storage, RejectsDuplicateAccountNumbers) {
     TempFile file("test_duplicate_accounts.txt");
-    file.write("ACC,1001,Alice,abc,def,10000,0\nACC,1001,Eve,abc,def,500,0\n");
+    file.write("ACC,1001,Alice,abc,def,10000,0,0\nACC,1001,Eve,abc,def,500,0,0\n");
     Bank bank;
     const auto outcome = storage::load(bank, file.path());
     EXPECT_FALSE(outcome.ok);
@@ -272,20 +273,20 @@ TEST(Storage, RejectsDuplicateAccountNumbers) {
 
 TEST(Storage, RejectsDuplicateAccountNumberOnTheFinalRecord) {
     TempFile file("test_duplicate_last.txt");
-    file.write("ACC,1001,Alice,abc,def,10000,0\nTXN,Deposit,100,x,10100\n"
-               "ACC,1001,Eve,abc,def,500,0\n");
+    file.write("ACC,1001,Alice,abc,def,10000,0,0\nTXN,Deposit,100,x,10100\n"
+               "ACC,1001,Eve,abc,def,500,0,0\n");
     Bank bank;
     EXPECT_FALSE(storage::load(bank, file.path()).ok);
 }
 
 TEST(Storage, RejectsEmptyNameAndNegativeBalance) {
     TempFile emptyName("test_empty_name.txt");
-    emptyName.write("ACC,1001,,abc,def,10000,0\n");
+    emptyName.write("ACC,1001,,abc,def,10000,0,0\n");
     Bank a;
     EXPECT_FALSE(storage::load(a, emptyName.path()).ok);
 
     TempFile negative("test_negative_balance.txt");
-    negative.write("ACC,1001,Alice,abc,def,-500,0\n");
+    negative.write("ACC,1001,Alice,abc,def,-500,0,0\n");
     Bank b;
     EXPECT_FALSE(storage::load(b, negative.path()).ok);
 }
@@ -304,7 +305,7 @@ TEST(Storage, DoesNotLeaveATemporaryFileBehind) {
 // Saving over an existing file must replace it wholesale, not merge into it.
 TEST(Storage, OverwritesAnExistingFileCompletely) {
     TempFile file("test_overwrite.txt");
-    file.write("ACC,9999,Stale,aa,bb,777,0\n");
+    file.write("ACC,9999,Stale,aa,bb,777,0,0\n");
 
     Bank replacement;
     replacement.createAccount(1001, "Alice", "1111", Money::fromPence(100));
@@ -314,4 +315,30 @@ TEST(Storage, OverwritesAnExistingFileCompletely) {
     ASSERT_TRUE(storage::load(loaded, file.path()).ok);
     ASSERT_EQ(1u, loaded.accounts().size());
     EXPECT_EQ(nullptr, loaded.findAccount(9999));
+}
+
+// The lock timestamp has to survive a restart, or a lock could be shed simply
+// by reopening the program.
+TEST(Storage, RoundTripsTheLockTimestamp) {
+    TempFile file("test_lock_time.txt");
+    const std::time_t now = 1700000000;
+
+    Bank original;
+    original.createAccount(1001, "Alice", "1111", Money::fromPence(10000));
+    for (int i = 0; i < Account::kMaxFailedAttempts; ++i) original.logIn(1001, "bad", now);
+    ASSERT_TRUE(original.findAccount(1001)->isLocked(now));
+    ASSERT_TRUE(storage::save(original, file.path()).ok);
+
+    Bank loaded;
+    ASSERT_TRUE(storage::load(loaded, file.path()).ok);
+    EXPECT_EQ(now, loaded.findAccount(1001)->lockedAt());
+    EXPECT_TRUE(loaded.findAccount(1001)->isLocked(now));
+    EXPECT_FALSE(loaded.findAccount(1001)->isLocked(now + Account::kLockoutSeconds));
+}
+
+TEST(Storage, RejectsANegativeLockTimestamp) {
+    TempFile file("test_bad_lock_time.txt");
+    file.write("ACC,1001,Alice,abc,def,10000,3,-5\n");
+    Bank bank;
+    EXPECT_FALSE(storage::load(bank, file.path()).ok);
 }

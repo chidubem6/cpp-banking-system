@@ -14,11 +14,11 @@ Bank::CreateResult Bank::createAccount(int accountNumber, const std::string& nam
     return CreateResult::Ok;
 }
 
-Bank::LoginResult Bank::logIn(int accountNumber, const std::string& pin) {
+Bank::LoginResult Bank::logIn(int accountNumber, const std::string& pin, std::time_t now) {
     Account* account = findAccount(accountNumber);
     if (account == nullptr) return LoginResult::NotFound;
 
-    switch (account->authenticate(pin)) {
+    switch (account->authenticate(pin, now)) {
         case Account::AuthResult::Ok:
             return LoginResult::Ok;
         case Account::AuthResult::Locked:
@@ -27,7 +27,7 @@ Bank::LoginResult Bank::logIn(int accountNumber, const std::string& pin) {
             break;
     }
     // A wrong PIN may have been the attempt that tripped the lock.
-    return account->isLocked() ? LoginResult::Locked : LoginResult::WrongPin;
+    return account->isLocked(now) ? LoginResult::Locked : LoginResult::WrongPin;
 }
 
 Bank::TransferResult Bank::transfer(int fromAccount, int toAccount, Money amount) {
