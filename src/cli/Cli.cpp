@@ -1,6 +1,7 @@
 #include "Cli.h"
 
 #include <cstddef>
+#include <ctime>
 #include <exception>
 #include <istream>
 #include <ostream>
@@ -113,7 +114,10 @@ void Cli::loginFlow() {
     const auto pin = readLine("PIN: ");
     if (!pin) return;
 
-    const auto result = bank_.logIn(*number, *pin);
+    // The clock is read here, at the edge, and passed inward. The domain layer
+    // takes the time as a parameter so its lockout expiry can be tested
+    // without sleeping.
+    const auto result = bank_.logIn(*number, *pin, std::time(nullptr));
     // Persist before branching: a failed attempt has already incremented the
     // account's counter, and that increment is the entire lockout mechanism.
     // If it only reached disk on a clean exit, an attacker would reset it by

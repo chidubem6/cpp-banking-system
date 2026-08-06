@@ -2,6 +2,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <ctime>
 #include <filesystem>
 #include <fstream>
 #include <limits>
@@ -129,7 +130,8 @@ SaveOutcome save(const Bank& bank, const std::string& path) {
         file << "ACC," << account.accountNumber() << ',' << escapeField(account.name()) << ','
              << escapeField(account.credential().salt) << ','
              << escapeField(account.credential().hash) << ',' << account.balance().pence() << ','
-             << account.failedAttempts() << '\n';
+             << account.failedAttempts() << ','
+             << static_cast<std::int64_t>(account.lockedAt()) << '\n';
 
         for (const auto& transaction : account.history()) {
             file << "TXN," << toStorageString(transaction.type()) << ','
@@ -182,6 +184,7 @@ LoadOutcome load(Bank& bank, const std::string& path) {
         PinCredential credential;
         Money balance;
         int failedAttempts{};
+        std::time_t lockedAt{};
         std::vector<Transaction> history;
         bool valid{false};
     } pending;
@@ -198,7 +201,8 @@ LoadOutcome load(Bank& bank, const std::string& path) {
 
         scratch.addAccount(Account(pending.number, std::move(pending.name),
                                    std::move(pending.credential), pending.balance,
-                                   pending.failedAttempts, std::move(pending.history)));
+                                   pending.failedAttempts, pending.lockedAt,
+                                   std::move(pending.history)));
         pending = PendingAccount{};
         return true;
     };
@@ -213,7 +217,7 @@ LoadOutcome load(Bank& bank, const std::string& path) {
         const auto fields = splitEscaped(line);
 
         if (fields[0] == "ACC") {
-            if (fields.size() != 7) return failure("Account record needs 7 fields", lineNumber);
+            if (fields.size() != 8) return failure("Account record needs 8 fields", lineNumber);
 
             if (!flush()) return failure("Duplicate account number", lineNumber);
 
@@ -228,11 +232,16 @@ LoadOutcome load(Bank& bank, const std::string& path) {
             if (attempts < 0) return failure("Negative attempt count", lineNumber);
             if (balancePence < 0) return failure("Negative balance", lineNumber);
 
+            std::int64_t lockedAtRaw = 0;
+            if (!parseInt64(fields[7], lockedAtRaw)) return failure("Bad lock time", lineNumber);
+            if (lockedAtRaw < 0) return failure("Negative lock time", lineNumber);
+
             pending.number = number;
             pending.name = fields[2];
             pending.credential = restorePinCredential(fields[3], fields[4]);
             pending.balance = Money::fromPence(balancePence);
             pending.failedAttempts = attempts;
+            pending.lockedAt = static_cast<std::time_t>(lockedAtRaw);
             pending.valid = true;
 
         } else if (fields[0] == "TXN") {

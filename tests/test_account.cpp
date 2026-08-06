@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 
 #include <cstdint>
+#include <ctime>
 #include <string>
 #include <vector>
 
@@ -10,6 +11,7 @@ namespace {
 Account makeAccount(std::int64_t openingPence = 10000) {
     return Account(12345, "Chidubem", "1234", Money::fromPence(openingPence));
 }
+constexpr std::time_t kNow = 1700000000;   // fixed instant; nothing reads the real clock
 }  // namespace
 
 TEST(Account, StartsWithTheOpeningBalanceAndNoHistory) {
@@ -18,7 +20,7 @@ TEST(Account, StartsWithTheOpeningBalanceAndNoHistory) {
     EXPECT_EQ("Chidubem", account.name());
     EXPECT_EQ(Money::fromPence(10000), account.balance());
     EXPECT_TRUE(account.history().empty());
-    EXPECT_FALSE(account.isLocked());
+    EXPECT_FALSE(account.isLocked(kNow));
 }
 
 TEST(Account, DepositIncreasesTheBalance) {
@@ -78,7 +80,7 @@ TEST(Account, RejectsNonPositiveWithdrawals) {
 
 TEST(Account, AuthenticatesTheCorrectPin) {
     auto account = makeAccount();
-    EXPECT_EQ(Account::AuthResult::Ok, account.authenticate("1234"));
+    EXPECT_EQ(Account::AuthResult::Ok, account.authenticate("1234", kNow));
     EXPECT_EQ(0, account.failedAttempts());
 }
 
@@ -89,31 +91,31 @@ TEST(Account, DoesNotStoreThePinInPlaintext) {
 
 TEST(Account, LocksAfterThreeConsecutiveFailures) {
     auto account = makeAccount();
-    EXPECT_EQ(Account::AuthResult::WrongPin, account.authenticate("0000"));
-    EXPECT_EQ(Account::AuthResult::WrongPin, account.authenticate("0000"));
-    EXPECT_FALSE(account.isLocked());
-    EXPECT_EQ(Account::AuthResult::WrongPin, account.authenticate("0000"));
-    EXPECT_TRUE(account.isLocked());
+    EXPECT_EQ(Account::AuthResult::WrongPin, account.authenticate("0000", kNow));
+    EXPECT_EQ(Account::AuthResult::WrongPin, account.authenticate("0000", kNow));
+    EXPECT_FALSE(account.isLocked(kNow));
+    EXPECT_EQ(Account::AuthResult::WrongPin, account.authenticate("0000", kNow));
+    EXPECT_TRUE(account.isLocked(kNow));
 }
 
 TEST(Account, CorrectPinIsRefusedOnceLocked) {
     auto account = makeAccount();
-    account.authenticate("0000");
-    account.authenticate("0000");
-    account.authenticate("0000");
-    ASSERT_TRUE(account.isLocked());
-    EXPECT_EQ(Account::AuthResult::Locked, account.authenticate("1234"));
+    account.authenticate("0000", kNow);
+    account.authenticate("0000", kNow);
+    account.authenticate("0000", kNow);
+    ASSERT_TRUE(account.isLocked(kNow));
+    EXPECT_EQ(Account::AuthResult::Locked, account.authenticate("1234", kNow));
 }
 
 TEST(Account, SuccessfulLoginResetsTheFailureCounter) {
     auto account = makeAccount();
-    account.authenticate("0000");
-    account.authenticate("0000");
+    account.authenticate("0000", kNow);
+    account.authenticate("0000", kNow);
     EXPECT_EQ(2, account.failedAttempts());
-    EXPECT_EQ(Account::AuthResult::Ok, account.authenticate("1234"));
+    EXPECT_EQ(Account::AuthResult::Ok, account.authenticate("1234", kNow));
     EXPECT_EQ(0, account.failedAttempts());
-    EXPECT_EQ(Account::AuthResult::WrongPin, account.authenticate("0000"));
-    EXPECT_FALSE(account.isLocked());
+    EXPECT_EQ(Account::AuthResult::WrongPin, account.authenticate("0000", kNow));
+    EXPECT_FALSE(account.isLocked(kNow));
 }
 
 TEST(Account, RestoringConstructorPreservesState) {
@@ -121,10 +123,73 @@ TEST(Account, RestoringConstructorPreservesState) {
     original.deposit(Money::fromPence(5000), TransactionType::Deposit, "Pay");
 
     Account restored(original.accountNumber(), original.name(), original.credential(),
-                     original.balance(), original.failedAttempts(),
+                     original.balance(), original.failedAttempts(), original.lockedAt(),
                      std::vector<Transaction>(original.history()));
 
     EXPECT_EQ(original.balance(), restored.balance());
     EXPECT_EQ(1u, restored.history().size());
-    EXPECT_EQ(Account::AuthResult::Ok, restored.authenticate("1234"));
+    EXPECT_EQ(Account::AuthResult::Ok, restored.authenticate("1234", kNow));
+}
+
+// --- Lockout expiry -------------------------------------------------------
+
+TEST(Account, LockExpiresAfterTheLockoutWindow) {
+    auto account = makeAccount();
+    account.authenticate("0000", kNow);
+    account.authenticate("0000", kNow);
+    account.authenticate("0000", kNow);
+    ASSERT_TRUE(account.isLocked(kNow));
+
+    // One second before expiry: still locked.
+    const std::time_t justBefore = kNow + Account::kLockoutSeconds - 1;
+    EXPECT_TRUE(account.isLocked(justBefore));
+    EXPECT_EQ(Account::AuthResult::Locked, account.authenticate("1234", justBefore));
+
+    // At expiry: open again, and the correct PIN works.
+    const std::time_t atExpiry = kNow + Account::kLockoutSeconds;
+    EXPECT_FALSE(account.isLocked(atExpiry));
+    EXPECT_EQ(Account::AuthResult::Ok, account.authenticate("1234", atExpiry));
+    EXPECT_EQ(0, account.failedAttempts());
+}
+
+// After an expiry the counter must start from zero, or a single wrong guess
+// would immediately re-trip the lock and the window would be useless.
+TEST(Account, ExpiryResetsTheCounterRatherThanLeavingItAtTheLimit) {
+    auto account = makeAccount();
+    for (int i = 0; i < 3; ++i) account.authenticate("0000", kNow);
+    ASSERT_TRUE(account.isLocked(kNow));
+
+    const std::time_t later = kNow + Account::kLockoutSeconds;
+    EXPECT_EQ(Account::AuthResult::WrongPin, account.authenticate("0000", later));
+    EXPECT_EQ(1, account.failedAttempts());
+    EXPECT_FALSE(account.isLocked(later));
+}
+
+TEST(Account, RelockingStartsAFreshWindow) {
+    auto account = makeAccount();
+    for (int i = 0; i < 3; ++i) account.authenticate("0000", kNow);
+
+    const std::time_t later = kNow + Account::kLockoutSeconds;
+    for (int i = 0; i < 3; ++i) account.authenticate("0000", later);
+    EXPECT_TRUE(account.isLocked(later));
+    EXPECT_EQ(later, account.lockedAt());
+    // The new window runs from `later`, not from the original lock.
+    EXPECT_TRUE(account.isLocked(later + Account::kLockoutSeconds - 1));
+    EXPECT_FALSE(account.isLocked(later + Account::kLockoutSeconds));
+}
+
+TEST(Account, SuccessfulLoginClearsTheLockTimestamp) {
+    auto account = makeAccount();
+    account.authenticate("0000", kNow);
+    account.authenticate("0000", kNow);
+    ASSERT_EQ(Account::AuthResult::Ok, account.authenticate("1234", kNow));
+    EXPECT_EQ(0, account.lockedAt());
+}
+
+TEST(Account, AnUnlockedAccountIgnoresTheClockEntirely) {
+    auto account = makeAccount();
+    account.authenticate("0000", kNow);
+    EXPECT_FALSE(account.isLocked(kNow));
+    EXPECT_FALSE(account.isLocked(0));
+    EXPECT_FALSE(account.isLocked(kNow + 999999));
 }

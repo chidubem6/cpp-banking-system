@@ -9,7 +9,7 @@
 // Reads and writes the save file. The only module that touches the disk.
 //
 // Format, one record per line, every field escaped:
-//   ACC,<number>,<name>,<saltHex>,<hashHex>,<balancePence>,<failedAttempts>
+//   ACC,<number>,<name>,<saltHex>,<hashHex>,<balancePence>,<failedAttempts>,<lockedAtEpoch>
 //   TXN,<type>,<amountPence>,<details>,<resultingBalancePence>
 //
 // TXN records attach to the most recent ACC. The record prefix means the

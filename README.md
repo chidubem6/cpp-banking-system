@@ -126,12 +126,11 @@ recipient. `Bank.FailedTransferLeavesBothBalancesUnchanged` covers exactly this.
 
 ### The save format escapes its fields
 
-Records carry an explicit `ACC` or `TXN` prefix, and `\`, `,`, `
-` and ``
-are escaped in a single pass, so escaping and unescaping are exact inverses. The
-previous plain-CSV format silently corrupted any name containing a comma, and an
-unescaped newline would have split one record into two and made the file
-permanently unloadable.
+Records carry an explicit `ACC` or `TXN` prefix, and backslash, comma, newline
+and carriage return are escaped in a single pass, so escaping and unescaping are
+exact inverses. The previous plain-CSV format silently corrupted any name
+containing a comma, and an unescaped newline would have split one record into
+two and made the file permanently unloadable.
 
 A malformed file is rejected wholesale rather than partially loaded, so a corrupt
 save cannot leave the program holding half a dataset.
@@ -148,6 +147,23 @@ There is one storage backend and no second one planned. An interface for a singl
 implementation is speculative generality — it can be introduced when a second
 backend actually exists.
 
+### Lockout expires on a clock the caller supplies
+
+Three consecutive wrong PINs lock an account for 15 minutes. `Account` never
+calls `std::time` itself - the current time is a parameter, and the CLI reads
+the clock at the edge and threads it inward.
+
+That keeps the expiry testable without sleeping: a test asserts the account is
+locked one second before the window closes and open one second after, in
+microseconds rather than half an hour. It also keeps the domain layer free of
+ambient dependencies.
+
+The window itself is a compromise. A permanent lock turns three mistyped PINs
+into an unrecoverable account - and because the lock is observable to anyone
+willing to guess three times, into a denial of service against any account
+number an attacker can enumerate. Expiry keeps the defence that matters: at
+three attempts per 15 minutes, exhausting a four-digit PIN takes about 52 days.
+
 ### Login does not distinguish unknown accounts from wrong PINs
 
 Both report "Incorrect account number or PIN." Telling an attacker which account
@@ -157,7 +173,7 @@ numbers exist is free reconnaissance.
 
 ## Testing
 
-93 tests, run on Linux (GCC) and Windows (MSVC) for every pull request and
+121 tests, run on Linux (GCC) and Windows (MSVC) for every pull request and
 every push to `main`.
 
 | Area | What is covered |
@@ -166,9 +182,10 @@ every push to `main`.
 | `Transaction` | Constructor stores what it was given — the regression test for the defect described below — and storage-string round trips |
 | `Sha256` | The three FIPS 180-2 Appendix B vectors, plus the empty-string digest and the padding boundaries the published vectors skip |
 | `PinCredential` | Salting, verification, that the PIN is never stored |
-| `Account` | Deposit and withdrawal rules, lockout, counter reset |
+| `Account` | Deposit and withdrawal rules, lockout, counter reset, expiry-window boundaries |
 | `Bank` | Every result branch, including that a failed transfer moves no money |
-| `Storage` | Round-trips, names containing commas, truncated and malformed files |
+| `Storage` | Round-trips, names containing commas and newlines, duplicate records, truncated and malformed files |
+| `Cli` | Scripted end-to-end sessions: input validation, CRLF endings, indistinguishable login failures, immediate persistence, refusal to start on a corrupt file |
 
 `Cli` takes its input and output streams by reference rather than reaching for
 `std::cin` and `std::cout` directly, so a test drives an entire session with two
@@ -189,9 +206,9 @@ below.
   wants when brute-forcing a four-digit PIN. Production needs a deliberately slow
   key-derivation function — Argon2, scrypt or bcrypt. Note also that a four-digit
   PIN has only 10,000 possibilities, so the real defence is lockout, not the hash.
-- **A locked account cannot be unlocked.** There is no administrator role, so
-  three failed attempts locks the account permanently. A real system would offer
-  time-based expiry or an administrative reset.
+- **A lock can only be waited out, not lifted.** There is no administrator
+  role, so a locked account stays locked for 15 minutes with no way to shorten
+  it. A real system would also offer an administrative reset.
 - **Salt generation draws from `std::random_device` directly.** The standard
   permits a deterministic implementation of it — MinGW-w64 GCC before 9.2
   shipped exactly that — so on such a toolchain every salt would be identical.

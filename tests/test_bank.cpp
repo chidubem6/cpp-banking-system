@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 
 #include <cstdint>
+#include <ctime>
 #include <limits>
 #include <vector>
 
@@ -14,6 +15,7 @@ Bank makeBankWithTwoAccounts() {
     bank.createAccount(1002, "Bob", "2222", Money::fromPence(5000));
     return bank;
 }
+constexpr std::time_t kNow = 1700000000;
 }  // namespace
 
 TEST(Bank, CreatesAnAccount) {
@@ -59,21 +61,21 @@ TEST(Bank, FindsNothingForAnUnknownAccount) {
 
 TEST(Bank, LogsInWithCorrectCredentials) {
     auto bank = makeBankWithTwoAccounts();
-    EXPECT_EQ(Bank::LoginResult::Ok, bank.logIn(1001, "1111"));
+    EXPECT_EQ(Bank::LoginResult::Ok, bank.logIn(1001, "1111", kNow));
 }
 
 TEST(Bank, ReportsUnknownAccountAndWrongPinSeparately) {
     auto bank = makeBankWithTwoAccounts();
-    EXPECT_EQ(Bank::LoginResult::NotFound, bank.logIn(9999, "1111"));
-    EXPECT_EQ(Bank::LoginResult::WrongPin, bank.logIn(1001, "0000"));
+    EXPECT_EQ(Bank::LoginResult::NotFound, bank.logIn(9999, "1111", kNow));
+    EXPECT_EQ(Bank::LoginResult::WrongPin, bank.logIn(1001, "0000", kNow));
 }
 
 TEST(Bank, ReportsLockedAccounts) {
     auto bank = makeBankWithTwoAccounts();
-    bank.logIn(1001, "0000");
-    bank.logIn(1001, "0000");
-    bank.logIn(1001, "0000");
-    EXPECT_EQ(Bank::LoginResult::Locked, bank.logIn(1001, "1111"));
+    bank.logIn(1001, "0000", kNow);
+    bank.logIn(1001, "0000", kNow);
+    bank.logIn(1001, "0000", kNow);
+    EXPECT_EQ(Bank::LoginResult::Locked, bank.logIn(1001, "1111", kNow));
 }
 
 TEST(Bank, TransferMovesMoneyBetweenAccounts) {
@@ -135,7 +137,7 @@ TEST(Bank, RejectsTransferThatWouldOverflowTheReceiver) {
     Bank bank;
     bank.createAccount(1001, "Alice", "1111", Money::fromPence(10000));
     bank.addAccount(Account(1002, "Rich", makePinCredential("2222"),
-                            Money::fromPence(std::numeric_limits<std::int64_t>::max()), 0,
+                            Money::fromPence(std::numeric_limits<std::int64_t>::max()), 0, 0,
                             std::vector<Transaction>{}));
     EXPECT_EQ(Bank::TransferResult::Overflow, bank.transfer(1001, 1002, Money::fromPence(100)));
     EXPECT_EQ(Money::fromPence(10000), bank.findAccount(1001)->balance());
@@ -151,4 +153,13 @@ TEST(Bank, TransferHistoryRecordsTheCounterpartyAccountNumber) {
               bank.findAccount(1001)->history().front().details().find("1002"));
     EXPECT_NE(std::string::npos,
               bank.findAccount(1002)->history().front().details().find("1001"));
+}
+
+TEST(Bank, LoginSucceedsAgainOnceTheLockExpires) {
+    auto bank = makeBankWithTwoAccounts();
+    for (int i = 0; i < 3; ++i) bank.logIn(1001, "0000", kNow);
+    ASSERT_EQ(Bank::LoginResult::Locked, bank.logIn(1001, "1111", kNow));
+
+    EXPECT_EQ(Bank::LoginResult::Ok,
+              bank.logIn(1001, "1111", kNow + Account::kLockoutSeconds));
 }

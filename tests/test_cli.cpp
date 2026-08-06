@@ -7,6 +7,7 @@
 #include <utility>
 
 #include "Cli.h"
+#include "Storage.h"
 
 // The CLI was previously untested on the grounds that driving std::cin costs
 // more than it returns. That was wrong: Cli already takes its streams by
@@ -213,9 +214,12 @@ TEST(Cli, FailedAttemptsArePersistedImmediately) {
 
     run("2\n1001\nbad\n2\n1001\nbad\n3\n", file.path());
 
-    // Field 7 of the ACC record is the failed-attempt count.
-    const std::string saved = file.read();
-    EXPECT_TRUE(contains(saved, ",2\n")) << saved;
+    // Read the count back through Storage rather than matching raw text, so
+    // the test does not break every time a field is added to the record.
+    Bank reloaded;
+    ASSERT_TRUE(storage::load(reloaded, file.path()).ok);
+    ASSERT_NE(nullptr, reloaded.findAccount(1001));
+    EXPECT_EQ(2, reloaded.findAccount(1001)->failedAttempts());
 }
 
 TEST(Cli, StartsCleanlyWhenTheDataFileIsMissing) {
@@ -250,4 +254,24 @@ TEST(Cli, RejectsOutOfRangeMenuChoices) {
     TempDataFile file("cli_menu_range.txt");
     const auto session = run("9\n3\n", file.path());
     EXPECT_TRUE(contains(session.output, "Please choose 1, 2 or 3."));
+}
+
+// A lock must not be permanent: three mistyped PINs should not brick an
+// account. The CLI reads the real clock, so this test verifies the lock is
+// active now and leaves the expiry-window arithmetic to test_account.cpp,
+// which injects the time.
+TEST(Cli, LockIsRecordedWithATimestampSoItCanExpire) {
+    TempDataFile file("cli_lock_expiry.txt");
+    run(createAlice() + "3\n", file.path());
+    run("2\n1001\nbad\n2\n1001\nbad\n2\n1001\nbad\n3\n", file.path());
+
+    Bank reloaded;
+    ASSERT_TRUE(storage::load(reloaded, file.path()).ok);
+    const Account* account = reloaded.findAccount(1001);
+    ASSERT_NE(nullptr, account);
+
+    EXPECT_EQ(Account::kMaxFailedAttempts, account->failedAttempts());
+    EXPECT_NE(0, account->lockedAt());   // a real instant, not a sentinel
+    EXPECT_TRUE(account->isLocked(account->lockedAt()));
+    EXPECT_FALSE(account->isLocked(account->lockedAt() + Account::kLockoutSeconds));
 }
