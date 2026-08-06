@@ -9,3 +9,10 @@ bin/
 
 # VSCode
 .vscode/
+
+# CMake
+build/
+build-*/
+
+# Runtime data
+accounts.txt
