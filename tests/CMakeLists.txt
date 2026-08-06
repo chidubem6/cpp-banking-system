@@ -16,6 +16,7 @@ add_executable(banking_tests
     test_smoke.cpp
     test_transaction.cpp
     test_money.cpp
+    test_sha256.cpp
 )
 target_link_libraries(banking_tests PRIVATE banking_core banking_warnings GTest::gtest_main)
 
