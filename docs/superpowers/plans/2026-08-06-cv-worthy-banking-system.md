@@ -15,7 +15,8 @@
 - **C++ standard:** C++17. `CMAKE_CXX_STANDARD 17`, `CMAKE_CXX_STANDARD_REQUIRED ON`, `CMAKE_CXX_EXTENSIONS OFF`.
 - **CMake floor:** `cmake_minimum_required(VERSION 3.20)`. Local toolchain is CMake 4.4.2, which rejects any project declaring a floor below 3.5.
 - **Local build note:** MSVC Build Tools 2022 is installed but `vcvars64.bat` is not on the default PATH, and CMake was installed this session so it is not on PATH until a shell restart. Use full paths when needed: `C:\Program Files\CMake\bin\cmake.exe`.
-- **Executable path differs by generator.** MSVC is multi-config, so the binary lands at `build/Debug/bank.exe`; single-config generators (Make, Ninja) put it at `build/bank`. Commands below assume the MSVC layout because that is the local toolchain — adjust on Linux. `ctest --test-dir build` works unchanged on both.
+- **Executable path differs by generator.** MSVC is multi-config, so the binary lands at `build/Debug/bank.exe`; single-config generators (Make, Ninja) put it at `build/bank`. Commands below assume the MSVC layout because that is the local toolchain — adjust on Linux.
+- **CTest needs an explicit config on multi-config generators.** `ctest --test-dir build` reports "No tests were found!!!" under Visual Studio; it must be `ctest --test-dir build -C Debug`. Confirmed during Task 1. Every `ctest` command in the tasks below therefore carries `-C Debug`, and the README must show the flag or a reader on Windows will conclude the suite is empty.
 - **Warnings:** `/W4` on MSVC, `-Wall -Wextra -Wpedantic` on GCC/Clang. Warnings are not errors locally, but CI treats the build as failed if it does not compile.
 - **Currency:** GBP only. Display symbol `£`. Storage is always an integer count of pence.
 - **No domain output:** nothing under `src/` except `src/cli/` may include `<iostream>` or write to `std::cout` / `std::cerr`.
