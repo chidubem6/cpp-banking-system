@@ -1,5 +1,6 @@
 #include "Cli.h"
 
+#include <cstddef>
 #include <exception>
 #include <istream>
 #include <ostream>
@@ -17,22 +18,37 @@ constexpr int kMenuExit = 3;
 Cli::Cli(std::istream& in, std::ostream& out) : in_{in}, out_{out} {}
 
 int Cli::run(const std::string& dataFile) {
-    const auto loaded = storage::load(bank_, dataFile);
+    dataFile_ = dataFile;
+
+    const auto loaded = storage::load(bank_, dataFile_);
     if (!loaded.ok) {
-        out_ << "Could not read " << dataFile << ": " << loaded.error << " (line " << loaded.line
-             << ")\n"
-             << "Refusing to start so the existing file is not overwritten.\n";
+        out_ << "Could not read " << dataFile_ << ": " << loaded.error;
+        if (loaded.line > 0) out_ << " (line " << loaded.line << ")";
+        out_ << "\nRefusing to start so the existing file is not overwritten.\n";
+        // A file written before the ACC/TXN record prefixes existed will fail
+        // here. It cannot be migrated - the old format stored PINs in plaintext
+        // and there is no salt to recover - so say so rather than leave the
+        // user guessing.
+        out_ << "If this file predates the current save format, move it aside "
+                "and start fresh; it cannot be migrated.\n";
         return 1;
     }
 
     mainMenu();
 
-    const auto saved = storage::save(bank_, dataFile);
+    const auto saved = storage::save(bank_, dataFile_);
     if (!saved.ok) {
         out_ << "Warning: could not save: " << saved.error << "\n";
         return 1;
     }
     return 0;
+}
+
+void Cli::persist() {
+    const auto saved = storage::save(bank_, dataFile_);
+    if (!saved.ok) {
+        out_ << "Warning: change was not saved: " << saved.error << "\n";
+    }
 }
 
 void Cli::mainMenu() {
@@ -73,6 +89,7 @@ void Cli::createAccount() {
 
     switch (bank_.createAccount(*number, *name, *pin, *opening)) {
         case Bank::CreateResult::Ok:
+            persist();
             out_ << "Account created.\n";
             break;
         case Bank::CreateResult::DuplicateAccountNumber:
@@ -96,7 +113,14 @@ void Cli::loginFlow() {
     const auto pin = readLine("PIN: ");
     if (!pin) return;
 
-    switch (bank_.logIn(*number, *pin)) {
+    const auto result = bank_.logIn(*number, *pin);
+    // Persist before branching: a failed attempt has already incremented the
+    // account's counter, and that increment is the entire lockout mechanism.
+    // If it only reached disk on a clean exit, an attacker would reset it by
+    // killing the process between guesses.
+    persist();
+
+    switch (result) {
         case Bank::LoginResult::Ok: {
             const Account* account = bank_.findAccount(*number);
             out_ << "Welcome, " << account->name() << ".\n";
@@ -105,13 +129,16 @@ void Cli::loginFlow() {
         }
         case Bank::LoginResult::NotFound:
         case Bank::LoginResult::WrongPin:
-            // Deliberately identical: telling an attacker which account
-            // numbers exist is free reconnaissance.
-            out_ << "Incorrect account number or PIN.\n";
-            break;
         case Bank::LoginResult::Locked:
-            out_ << "This account is locked after " << Account::kMaxFailedAttempts
-                 << " failed attempts and cannot be unlocked.\n";
+            // All three report identically, on purpose.
+            //
+            // A distinct "this account is locked" message would undo the very
+            // thing the shared message exists for: probe a number with three
+            // wrong PINs, and a different response on the third tells you the
+            // account exists. Since the lock is permanent, that same probe is
+            // also an irreversible denial of service against every account an
+            // attacker can enumerate.
+            out_ << "Incorrect account number or PIN.\n";
             break;
     }
 }
@@ -147,6 +174,7 @@ void Cli::deposit(int accountNumber) {
     Account* account = bank_.findAccount(accountNumber);
     switch (account->deposit(*amount, TransactionType::Deposit, "Money deposited")) {
         case Account::DepositResult::Ok:
+            persist();
             out_ << "Deposited " << amount->toString() << ". Balance: "
                  << account->balance().toString() << "\n";
             break;
@@ -166,6 +194,7 @@ void Cli::withdraw(int accountNumber) {
     Account* account = bank_.findAccount(accountNumber);
     switch (account->withdraw(*amount, TransactionType::Withdrawal, "Money withdrawn")) {
         case Account::WithdrawResult::Ok:
+            persist();
             out_ << "Withdrew " << amount->toString() << ". Balance: "
                  << account->balance().toString() << "\n";
             break;
@@ -186,6 +215,7 @@ void Cli::transfer(int accountNumber) {
 
     switch (bank_.transfer(accountNumber, *target, *amount)) {
         case Bank::TransferResult::Ok:
+            persist();
             out_ << "Sent " << amount->toString() << " to " << bank_.findAccount(*target)->name()
                  << ". Balance: " << bank_.findAccount(accountNumber)->balance().toString() << "\n";
             break;
@@ -232,6 +262,7 @@ std::optional<int> Cli::readInt(const std::string& prompt) {
         out_ << prompt;
         std::string line;
         if (!std::getline(in_, line)) return std::nullopt;
+        if (!line.empty() && line.back() == '\r') line.pop_back();
 
         try {
             std::size_t consumed = 0;
@@ -250,6 +281,13 @@ std::optional<std::string> Cli::readLine(const std::string& prompt) {
     out_ << prompt;
     std::string line;
     if (!std::getline(in_, line)) return std::nullopt;
+
+    // Strip a trailing CR so a CRLF-authored script piped in on Linux behaves.
+    // Without this every menu choice fails to parse and the program burns
+    // through the whole script doing nothing - and a name would silently
+    // acquire a trailing '\r'. Storage::load already handles this on its own
+    // input; the two paths should agree.
+    if (!line.empty() && line.back() == '\r') line.pop_back();
     return line;
 }
 
@@ -258,6 +296,7 @@ std::optional<Money> Cli::readMoney(const std::string& prompt) {
         out_ << prompt;
         std::string line;
         if (!std::getline(in_, line)) return std::nullopt;
+        if (!line.empty() && line.back() == '\r') line.pop_back();
 
         if (auto amount = Money::fromString(line)) return amount;
         out_ << "Please enter an amount such as 100 or 12.34.\n";
