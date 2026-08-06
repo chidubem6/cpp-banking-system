@@ -23,6 +23,7 @@ add_library(banking_core
     src/Account.cpp
     src/Bank.cpp
     src/Money.cpp
+    src/PinCredential.cpp
     src/Sha256.cpp
     src/Transaction.cpp
 )
