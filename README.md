@@ -1,4 +1,4 @@
-# 💳 Simple Banking System (C++)
+# 💳 Banking System (C++)
 
 ## 📌 Overview
 
@@ -122,7 +122,7 @@ Methods:
 
 ```
 
-BankingSystem/
+cpp-banking-system/
 │
 ├── main.cpp
 ├── Account.h
@@ -218,7 +218,7 @@ g++ main.cpp Account.cpp Bank.cpp Transaction.cpp -o bank
 
 ## 📌 Example Resume Description
 
-**Simple Banking System | C++**
+**Banking System | C++**
 
 * Built a command-line banking application using object-oriented design to manage accounts, transactions, and inter-account transfers
 * Implemented persistent file storage and transaction history tracking with robust input validation and modular architecture
