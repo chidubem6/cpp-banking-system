@@ -20,8 +20,9 @@ add_executable(banking_tests
     test_account.cpp
     test_bank.cpp
     test_storage.cpp
+    test_cli.cpp
 )
-target_link_libraries(banking_tests PRIVATE banking_core banking_warnings GTest::gtest_main)
+target_link_libraries(banking_tests PRIVATE banking_cli banking_warnings GTest::gtest_main)
 
 include(GoogleTest)
 gtest_discover_tests(banking_tests)
