@@ -23,8 +23,13 @@ constexpr std::array<std::uint32_t, 64> kRoundConstants = {
     0x5b9cca4f, 0x682e6ff3, 0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208,
     0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2};
 
+// Masking n makes this total. Without it, n == 0 shifts by 32, which is
+// undefined behaviour. No caller passes 0 today - every rotation amount is a
+// literal from the spec - but a future SHA-224 or HMAC path would be one typo
+// away from UB, and the mask costs nothing (both compilers still emit a single
+// rotate instruction).
 std::uint32_t rotr(std::uint32_t x, unsigned n) {
-    return (x >> n) | (x << (32 - n));
+    return (x >> (n & 31u)) | (x << ((32u - n) & 31u));
 }
 
 // Processes one 512-bit block into the running state.
