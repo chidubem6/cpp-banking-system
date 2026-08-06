@@ -18,6 +18,9 @@ add_executable(banking_tests
     test_money.cpp
     test_sha256.cpp
     test_pin_credential.cpp
+    test_account.cpp
+    test_bank.cpp
+    test_storage.cpp
 )
 target_link_libraries(banking_tests PRIVATE banking_core banking_warnings GTest::gtest_main)
 

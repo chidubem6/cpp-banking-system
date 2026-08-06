@@ -25,6 +25,7 @@ add_library(banking_core
     src/Money.cpp
     src/PinCredential.cpp
     src/Sha256.cpp
+    src/Storage.cpp
     src/Transaction.cpp
 )
 target_include_directories(banking_core
@@ -32,7 +33,10 @@ target_include_directories(banking_core
 )
 target_link_libraries(banking_core PUBLIC banking_warnings)
 
-add_executable(bank src/cli/main.cpp)
+add_executable(bank
+    src/cli/main.cpp
+    src/cli/Cli.cpp
+)
 target_link_libraries(bank PRIVATE banking_core)
 
 include(CTest)
