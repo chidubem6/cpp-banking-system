@@ -7,7 +7,7 @@
 
 #include "Money.h"
 
-enum class TransactionType { Deposit, Withdrawal, TransferIn, TransferOut };
+enum class TransactionType { Deposit, Withdrawal, TransferIn, TransferOut, Reversal };
 
 // Stable token written to the save file. Changing these breaks existing files.
 std::string toStorageString(TransactionType type);

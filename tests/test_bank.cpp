@@ -5,6 +5,7 @@
 #include <vector>
 
 #include "Bank.h"
+#include "Transaction.h"
 
 namespace {
 Bank makeBankWithTwoAccounts() {
@@ -138,4 +139,16 @@ TEST(Bank, RejectsTransferThatWouldOverflowTheReceiver) {
                             std::vector<Transaction>{}));
     EXPECT_EQ(Bank::TransferResult::Overflow, bank.transfer(1001, 1002, Money::fromPence(100)));
     EXPECT_EQ(Money::fromPence(10000), bank.findAccount(1001)->balance());
+}
+
+// Names are not unique - createAccount rejects only duplicate numbers - so the
+// ledger must record which account the money actually went to.
+TEST(Bank, TransferHistoryRecordsTheCounterpartyAccountNumber) {
+    auto bank = makeBankWithTwoAccounts();
+    ASSERT_EQ(Bank::TransferResult::Ok, bank.transfer(1001, 1002, Money::fromPence(2500)));
+
+    EXPECT_NE(std::string::npos,
+              bank.findAccount(1001)->history().front().details().find("1002"));
+    EXPECT_NE(std::string::npos,
+              bank.findAccount(1002)->history().front().details().find("1001"));
 }

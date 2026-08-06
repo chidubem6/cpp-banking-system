@@ -40,9 +40,15 @@ private:
     std::optional<std::string> readLine(const std::string& prompt);
     std::optional<Money> readMoney(const std::string& prompt);
 
+    // Writes the bank to disk after every state change. Saving only on a clean
+    // exit made the lockout counter resettable by killing the process, and lost
+    // every committed transaction on a crash despite having reported success.
+    void persist();
+
     std::istream& in_;
     std::ostream& out_;
     Bank bank_;
+    std::string dataFile_;
 };
 
 #endif

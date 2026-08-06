@@ -19,7 +19,8 @@ TEST(Transaction, StoresAllConstructorArguments) {
 
 TEST(Transaction, TypeRoundTripsThroughStorageStrings) {
     const TransactionType all[] = {TransactionType::Deposit, TransactionType::Withdrawal,
-                                   TransactionType::TransferIn, TransactionType::TransferOut};
+                                   TransactionType::TransferIn, TransactionType::TransferOut,
+                                   TransactionType::Reversal};
     for (TransactionType type : all) {
         const auto parsed = transactionTypeFromStorageString(toStorageString(type));
         ASSERT_TRUE(parsed.has_value());

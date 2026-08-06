@@ -100,7 +100,7 @@ TEST(Storage, RoundTripsTransactionHistory) {
     EXPECT_EQ(TransactionType::TransferOut, history.front().type());
     EXPECT_EQ(Money::fromPence(2500), history.front().amount());
     EXPECT_EQ(Money::fromPence(7500), history.front().resultingBalance());
-    EXPECT_EQ("Sent to Bob", history.front().details());
+    EXPECT_EQ("Sent to Bob (1002)", history.front().details());
 }
 
 // The old plain-CSV format silently corrupted this.
@@ -221,4 +221,97 @@ TEST(Storage, LeavesTheBankUntouchedWhenLoadingFails) {
     ASSERT_EQ(1u, bank.accounts().size());
     EXPECT_EQ("Pre-existing", bank.accounts().front().name());
     EXPECT_EQ(nullptr, bank.findAccount(1001));   // the good line did not land
+}
+
+// --- Regression tests for review findings ---------------------------------
+
+// The line-based format is destroyed by an unescaped newline: one record
+// becomes two, and every later load fails with "Account record needs 7
+// fields", locking the user out of their own data permanently.
+TEST(StorageEscaping, EscapesNewlinesAndCarriageReturns) {
+    // A real newline becomes the two characters backslash and 'n'.
+    EXPECT_EQ("a\\nb", storage::escapeField("a\nb"));
+    EXPECT_EQ("a\\rb", storage::escapeField("a\rb"));
+    EXPECT_EQ("a\nb", storage::unescapeField("a\\nb"));
+    EXPECT_EQ("a\rb", storage::unescapeField("a\\rb"));
+
+    // Round trip through both directions, which is what the format relies on.
+    const std::string awkward = "line one\nline two\r\n, and \\ too";
+    EXPECT_EQ(awkward, storage::unescapeField(storage::escapeField(awkward)));
+}
+
+TEST(Storage, SurvivesANameContainingANewline) {
+    TempFile file("test_newline_name.txt");
+    Bank original;
+    // Crafted to look like a second ACC record if the newline escaped the
+    // format - the classic injection shape.
+    original.createAccount(1001, "Eve\nACC,999,Mallory,aa,bb,999999,0", "1111",
+                           Money::fromPence(100));
+    ASSERT_TRUE(storage::save(original, file.path()).ok);
+
+    Bank loaded;
+    const auto outcome = storage::load(loaded, file.path());
+    ASSERT_TRUE(outcome.ok) << outcome.error << " line " << outcome.line;
+    ASSERT_EQ(1u, loaded.accounts().size());   // no injected second account
+    EXPECT_EQ("Eve\nACC,999,Mallory,aa,bb,999999,0", loaded.findAccount(1001)->name());
+    EXPECT_EQ(nullptr, loaded.findAccount(999));
+}
+
+// Bank::addAccount enforces none of createAccount's invariants and the loader
+// is its only caller. Two records with the same number would both load, and
+// findAccount would return only the first - stranding the second's money while
+// save() faithfully rewrote it.
+TEST(Storage, RejectsDuplicateAccountNumbers) {
+    TempFile file("test_duplicate_accounts.txt");
+    file.write("ACC,1001,Alice,abc,def,10000,0\nACC,1001,Eve,abc,def,500,0\n");
+    Bank bank;
+    const auto outcome = storage::load(bank, file.path());
+    EXPECT_FALSE(outcome.ok);
+    EXPECT_TRUE(bank.accounts().empty());
+}
+
+TEST(Storage, RejectsDuplicateAccountNumberOnTheFinalRecord) {
+    TempFile file("test_duplicate_last.txt");
+    file.write("ACC,1001,Alice,abc,def,10000,0\nTXN,Deposit,100,x,10100\n"
+               "ACC,1001,Eve,abc,def,500,0\n");
+    Bank bank;
+    EXPECT_FALSE(storage::load(bank, file.path()).ok);
+}
+
+TEST(Storage, RejectsEmptyNameAndNegativeBalance) {
+    TempFile emptyName("test_empty_name.txt");
+    emptyName.write("ACC,1001,,abc,def,10000,0\n");
+    Bank a;
+    EXPECT_FALSE(storage::load(a, emptyName.path()).ok);
+
+    TempFile negative("test_negative_balance.txt");
+    negative.write("ACC,1001,Alice,abc,def,-500,0\n");
+    Bank b;
+    EXPECT_FALSE(storage::load(b, negative.path()).ok);
+}
+
+// save() must not leave a .tmp file behind on success.
+TEST(Storage, DoesNotLeaveATemporaryFileBehind) {
+    TempFile file("test_no_tmp.txt");
+    TempFile temporary("test_no_tmp.txt.tmp");   // cleaned up even if left
+    auto bank = makeBank();
+    ASSERT_TRUE(storage::save(bank, file.path()).ok);
+
+    std::ifstream leftover(temporary.path());
+    EXPECT_FALSE(leftover.good());
+}
+
+// Saving over an existing file must replace it wholesale, not merge into it.
+TEST(Storage, OverwritesAnExistingFileCompletely) {
+    TempFile file("test_overwrite.txt");
+    file.write("ACC,9999,Stale,aa,bb,777,0\n");
+
+    Bank replacement;
+    replacement.createAccount(1001, "Alice", "1111", Money::fromPence(100));
+    ASSERT_TRUE(storage::save(replacement, file.path()).ok);
+
+    Bank loaded;
+    ASSERT_TRUE(storage::load(loaded, file.path()).ok);
+    ASSERT_EQ(1u, loaded.accounts().size());
+    EXPECT_EQ(nullptr, loaded.findAccount(9999));
 }
