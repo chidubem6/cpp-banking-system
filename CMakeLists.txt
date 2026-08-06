@@ -22,6 +22,7 @@ endif()
 add_library(banking_core
     src/Account.cpp
     src/Bank.cpp
+    src/Money.cpp
     src/Transaction.cpp
 )
 target_include_directories(banking_core
