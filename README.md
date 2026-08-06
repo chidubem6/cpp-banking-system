@@ -5,8 +5,8 @@ deposits, withdrawals, transfers, transaction history, and file persistence.
 
 [![CI](https://github.com/chidubem6/cpp-banking-system/actions/workflows/ci.yml/badge.svg)](https://github.com/chidubem6/cpp-banking-system/actions/workflows/ci.yml)
 
-Built to be correct rather than large: money is exact, every business rule is
-tested, and the reasoning behind each decision is written down below.
+Built to be correct rather than large: money is exact, the domain logic is
+covered by tests, and the reasoning behind each decision is written down below.
 
 ---
 
@@ -43,6 +43,8 @@ Enter choice: 1
 Amount to deposit: 75.50
 Deposited £75.50. Balance: £325.50
 
+[session menu repeats between each step, omitted below]
+
 Enter choice: 5
 Deposit  £75.50  Money deposited  (balance £325.50)
 
@@ -54,7 +56,7 @@ Balance: £325.50
 
 ## Build and run
 
-Requires CMake 3.20 or later and a C++17 compiler. GoogleTest is fetched
+Requires CMake 3.24 or later and a C++17 compiler. GoogleTest is fetched
 automatically at configure time, so the first build needs network access.
 
 ```bash
@@ -65,6 +67,10 @@ ctest --test-dir build -C Debug --output-on-failure
 
 Then run the binary — `build/bank` with Make or Ninja, `build/Debug/bank.exe`
 with Visual Studio.
+
+The data file `accounts.txt` is created in the working directory, so running
+`build/bank` from the repository root and `./bank` from inside `build/` gives
+you two separate datasets.
 
 The `-C Debug` on the test command is required by multi-config generators such
 as Visual Studio. Without it CTest reports "No tests were found".
@@ -85,8 +91,8 @@ as Visual Studio. Without it CTest reports "No tests were found".
 | `Cli` | Menus, input validation, every line of console output |
 
 **Domain code never writes to the console; the CLI owns all output.** That
-separation is what makes the domain testable — and it is the single change that
-took this project from zero tests to 82.
+separation is what made the test suite possible: before it, verifying a transfer
+would have meant capturing stdout and matching English prose.
 
 ---
 
@@ -99,9 +105,9 @@ transactions accumulate. A ledger that does not balance defeats the purpose of
 the program. `tests/test_money.cpp` performs 10,000 additions of 10p and asserts
 the total is exactly £1000.00 — a test that fails under `double`.
 
-The general term is the currency's *minor unit* (ISO 4217). "Cents" is
-USD-specific and the ×100 relationship is not universal: JPY has no minor unit,
-KWD uses thousandths. This type is deliberately GBP-specific rather than
+The general term is the currency's *minor unit* (ISO 4217). The ×100
+relationship is not universal — ISO 4217 assigns JPY zero decimal places, and
+KWD uses thousandths — so this type is deliberately GBP-specific rather than
 pretending to be general.
 
 ### Business outcomes are return values, not exceptions
@@ -120,9 +126,12 @@ recipient. `Bank.FailedTransferLeavesBothBalancesUnchanged` covers exactly this.
 
 ### The save format escapes its fields
 
-Records carry an explicit `ACC` or `TXN` prefix, and `\` and `,` are escaped —
-backslash first, so the transformation is reversible. The previous plain-CSV
-format silently corrupted any name containing a comma.
+Records carry an explicit `ACC` or `TXN` prefix, and `\`, `,`, `
+` and ``
+are escaped in a single pass, so escaping and unescaping are exact inverses. The
+previous plain-CSV format silently corrupted any name containing a comma, and an
+unescaped newline would have split one record into two and made the file
+permanently unloadable.
 
 A malformed file is rejected wholesale rather than partially loaded, so a corrupt
 save cannot leave the program holding half a dataset.
@@ -148,12 +157,14 @@ numbers exist is free reconnaissance.
 
 ## Testing
 
-82 tests, run on Linux (GCC) and Windows (MSVC) on every push and pull request.
+93 tests, run on Linux (GCC) and Windows (MSVC) for every pull request and
+every push to `main`.
 
 | Area | What is covered |
 |---|---|
 | `Money` | Parsing, rejection of malformed input, exact arithmetic, formatting, overflow |
-| `Sha256` | The four published FIPS 180-2 test vectors |
+| `Transaction` | Constructor stores what it was given — the regression test for the defect described below — and storage-string round trips |
+| `Sha256` | The three FIPS 180-2 Appendix B vectors, plus the empty-string digest and the padding boundaries the published vectors skip |
 | `PinCredential` | Salting, verification, that the PIN is never stored |
 | `Account` | Deposit and withdrawal rules, lockout, counter reset |
 | `Bank` | Every result branch, including that a failed transfer moves no money |
@@ -172,8 +183,6 @@ below.
 
 ## Known limitations
 
-Stated deliberately. Each is a boundary, not an oversight.
-
 - **PIN hashing uses SHA-256.** SHA-256 is fast, and speed is what an attacker
   wants when brute-forcing a four-digit PIN. Production needs a deliberately slow
   key-derivation function — Argon2, scrypt or bcrypt. Note also that a four-digit
@@ -181,11 +190,16 @@ Stated deliberately. Each is a boundary, not an oversight.
 - **A locked account cannot be unlocked.** There is no administrator role, so
   three failed attempts locks the account permanently. A real system would offer
   time-based expiry or an administrative reset.
-- **Salt generation uses `std::mt19937_64`**, seeded from `std::random_device`.
-  Adequate for demonstration, not a cryptographically secure generator.
-- **Storage is a plain text file rewritten in full on exit.** There is no
-  journaling, so a crash mid-write loses the session. A real system would write to
-  a temporary file and rename it atomically.
+- **Salt generation draws from `std::random_device` directly.** The standard
+  permits a deterministic implementation of it — MinGW-w64 GCC before 9.2
+  shipped exactly that — so on such a toolchain every salt would be identical.
+  The distinct-salt test is the canary for this.
+- **Storage is a plain text file rewritten in full after every change.** It is
+  written to a temporary file and renamed over the target, so an interrupted
+  write cannot corrupt the existing data — but the whole file is rewritten each
+  time, which does not scale beyond a toy dataset.
+- **No account closure and no PIN change.** Both are straightforward additions;
+  neither is implemented.
 - **Single user, no concurrency.** Nothing guards against two processes opening
   the same file.
 - **GBP only.** `Money` hard-codes a two-decimal minor unit and the £ symbol.
@@ -215,7 +229,8 @@ Deposit,50,Money deposited,2.87198e-312
 
 It compiled cleanly at default warning levels and the account balance looked
 correct, so nothing appeared wrong until the ledger was inspected. `/W4` reported
-it as an unreferenced parameter. There is now a regression test.
+it as C4100, an unreferenced parameter; GCC's `-Wextra` would have caught it
+too. There is now a regression test.
 
 Design notes and the implementation plan are in [`docs/superpowers/`](docs/superpowers/).
 
