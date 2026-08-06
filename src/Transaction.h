@@ -10,7 +10,7 @@ class Transaction {
         double resultingBalance;
 
     public:
-        Transaction(std::string type, double amount, std::string details, double reusltingBalance)
+        Transaction(std::string type, double amount, std::string details, double resultingBalance)
             : type{ type }, amount { amount }, details { details }, resultingBalance { resultingBalance } {}
 
         std::string getType() const { return type; };
